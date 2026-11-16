@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'">
+<meta name="description" content="Robot joint motor thermal lab: winding temperature, time to limit and continuous torque for a repeating load cycle. Runs entirely in your browser.">
+<title>motor-therm</title>
+<link data-trunk rel="rust" href="crates/mt_web/Cargo.toml">
+<link data-trunk rel="copy-file" href="web/boot.js">
+<style>
+:root { --bg:#f4f5f7; --panel:#fff; --fg:#1b1e24; --mute:#5d6470; --line:#d5d9e0; --acc:#d9480f; --btn:#e9ecf1; --on:#1c64d8; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#111419; --panel:#1a1e25; --fg:#e4e7ec; --mute:#9aa2ae; --line:#2e3440; --acc:#ff8a3d; --btn:#262c36; --on:#4d8dff; }
+}
+* { box-sizing:border-box; }
+html, body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display:flex; align-items:center; gap:12px; padding:10px 16px; border-bottom:1px solid var(--line); }
+header h1 { font-size:18px; margin:0; }
+header p { margin:0; color:var(--mute); flex:1; font-size:13px; }
+button, select, input { font:inherit; color:inherit; }
+button { background:var(--btn); border:1px solid var(--line); border-radius:6px; padding:4px 10px; cursor:pointer; }
+button.on { background:var(--on); color:#fff; border-color:var(--on); }
+select, input[type=number] { background:var(--panel); border:1px solid var(--line); border-radius:5px; padding:3px 5px; width:100%; }
+main { display:grid; grid-template-columns:330px 1fr; gap:12px; padding:12px 16px; }
+section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:12px; }
+h2 { font-size:14px; margin:0 0 8px; }
+.grid { display:grid; grid-template-columns:1fr 92px; gap:4px 8px; align-items:center; }
+.grid label { color:var(--mute); font-size:13px; }
+table { border-collapse:collapse; width:100%; }
+td, th { padding:2px 4px; text-align:left; font-size:13px; }
+th { color:var(--mute); font-weight:500; }
+#view { position:relative; height:440px; border-radius:10px; overflow:hidden; background:#000; touch-action:none; }
+#gl { width:100%; height:100%; display:block; touch-action:none; }
+#hud { position:absolute; left:8px; top:8px; background:rgba(10,12,16,.62); color:#e8ecf2; padding:6px 9px; border-radius:7px; font:12px/1.45 ui-monospace, Menlo, Consolas, monospace; pointer-events:none; white-space:pre; }
+#tog, #views { position:absolute; right:8px; display:flex; flex-wrap:wrap; gap:4px; justify-content:flex-end; max-width:60%; }
+#tog { top:8px; } #views { bottom:8px; }
+#tog button, #views button { font-size:12px; padding:3px 8px; opacity:.92; }
+#nogl { position:absolute; inset:0; display:none; align-items:center; justify-content:center; color:#ccd; padding:20px; text-align:center; }
+#hint { position:absolute; left:8px; bottom:8px; color:#cfd6e0; font-size:11px; pointer-events:none; text-shadow:0 1px 2px #000; }
+.bar { display:flex; align-items:center; gap:6px; margin:8px 0; flex-wrap:wrap; }
+.bar input[type=range] { flex:1; min-width:140px; }
+canvas.plot { width:100%; height:190px; display:block; }
+#ptorque { height:120px; }
+.res { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:6px 14px; }
+.res div { border-left:3px solid var(--line); padding-left:8px; }
+.res b { display:block; font-size:16px; }
+.res span { color:var(--mute); font-size:12px; }
+#warn { color:var(--acc); font-weight:600; margin-top:6px; }
+.note { color:var(--mute); font-size:12px; margin-top:6px; }
+@media (max-width: 860px) {
+  main { grid-template-columns:1fr; padding:10px; }
+  #view { height:340px; }
+  header p { display:none; }
+  #lang { margin-left:auto; }
+  main > div:last-child { order:-1; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>motor-therm</h1>
+  <p data-i18n="subtitle">Robot joint motor thermal lab</p>
+  <button id="lang">한국어</button>
+</header>
+<main>
+<div>
+  <section>
+    <h2 data-i18n="motor">Motor</h2>
+    <select id="mpreset">
+      <option value="0" data-i18n="m_small">small servo (typical)</option>
+      <option value="1" data-i18n="m_qdd">mid quasi-direct-drive (typical)</option>
+      <option value="2" data-i18n="m_large">large frameless torque motor (typical)</option>
+    </select>
+    <div class="grid" style="margin-top:8px">
+      <label for="kt" data-i18n="kt">Torque constant Kt (N·m/A)</label><input id="kt" type="number" step="0.001" min="0">
+      <label for="rpp" data-i18n="rpp">Phase-phase R at 25 °C (Ω)</label><input id="rpp" type="number" step="0.01" min="0">
+      <label for="alpha" data-i18n="alpha">Copper temp. coeff. α (1/K)</label><input id="alpha" type="number" step="0.0001" min="0">
+      <label for="ratio" data-i18n="ratio">Gear ratio</label><input id="ratio" type="number" step="1" min="0">
+      <label for="eta" data-i18n="eta">Gearbox efficiency η</label><input id="eta" type="number" step="0.01" min="0" max="1">
+      <label for="rth1" data-i18n="rth1">Rth1 winding→housing (K/W)</label><input id="rth1" type="number" step="0.1" min="0">
+      <label for="rth2" data-i18n="rth2">Rth2 housing→ambient (K/W)</label><input id="rth2" type="number" step="0.1" min="0">
+      <label for="tau1" data-i18n="tau1">τ1 winding (s)</label><input id="tau1" type="number" step="1" min="0">
+      <label for="tau2" data-i18n="tau2">τ2 housing (s)</label><input id="tau2" type="number" step="10" min="0">
+      <label for="tamb" data-i18n="tamb">Ambient (°C)</label><input id="tamb" type="number" step="1">
+      <label for="tlim" data-i18n="tlim">Winding limit (°C)</label><input id="tlim" type="number" step="1">
+      <label for="cool" data-i18n="cool">Cooling factor on Rth2</label><input id="cool" type="number" step="0.05" min="0">
+    </div>
+  </section>
+  <section>
+    <h2 data-i18n="cycle">Load cycle (joint output)</h2>
+    <select id="cpreset">
+      <option value="0" data-i18n="c_hold">hold (static pose)</option>
+      <option value="1" data-i18n="c_gait">walking gait knee</option>
+      <option value="2" data-i18n="c_pick">pick-and-place</option>
+      <option value="3" data-i18n="c_stairs">stair climb</option>
+    </select>
+    <table style="margin-top:6px">
+      <thead><tr><th>#</th><th data-i18n="dur">duration (s)</th><th data-i18n="torque">torque (N·m)</th></tr></thead>
+      <tbody id="segs"></tbody>
+    </table>
+    <div class="grid" style="margin-top:8px">
+      <label for="arm" data-i18n="arm">Link arm length (m)</label><input id="arm" type="number" step="0.05" min="0" value="0.3">
+      <label for="payload" data-i18n="payload">Payload at arm tip (kg)</label><input id="payload" type="number" step="0.1" min="0" max="10" value="0">
+      <label for="simmin" data-i18n="simmin">Simulated time (min)</label><input id="simmin" type="number" step="1" min="1" max="120" value="20">
+    </div>
+    <p class="note" data-i18n="payload_note">Payload adds m·g·L to every loaded segment. Drag the arm tip up/down in the 3D view to change it.</p>
+  </section>
+</div>
+<div>
+  <div id="view">
+    <canvas id="gl"></canvas>
+    <div id="hud"></div>
+    <div id="tog">
+      <button id="t_cut" class="on" data-i18n="t_cut">cutaway</button>
+      <button id="t_flow" class="on" data-i18n="t_flow">heat flow</button>
+      <button id="t_thermo" class="on" data-i18n="t_thermo">thermometer</button>
+      <button id="t_arm" class="on" data-i18n="t_arm">link arm</button>
+    </div>
+    <div id="views">
+      <button id="v0" class="on" data-i18n="v_persp">Perspective</button>
+      <button id="v1" data-i18n="v_top">Top</button>
+      <button id="v2" data-i18n="v_side">Side</button>
+      <button id="v3" data-i18n="v_section">Section</button>
+    </div>
+    <div id="hint" data-i18n="hint">drag: orbit · right/2 fingers: pan · wheel/pinch: zoom · double-click: reset</div>
+    <div id="nogl" data-i18n="nogl">WebGL2 is not available in this browser. Numbers and plots still work.</div>
+  </div>
+  <div class="bar">
+    <button id="play" data-i18n="pause">pause</button>
+    <button id="s1">1×</button><button id="s10">10×</button><button id="s60" class="on">60×</button>
+    <input id="time" type="range" min="0" max="1000" value="0" aria-label="time">
+  </div>
+  <section>
+    <h2 data-i18n="results">Results</h2>
+    <div class="res" id="res"></div>
+    <div id="warn"></div>
+  </section>
+  <section>
+    <h2 data-i18n="p_temp">Temperature vs time</h2>
+    <canvas id="ptemp" class="plot"></canvas>
+    <h2 data-i18n="p_torque" style="margin-top:8px">Load torque (cycle)</h2>
+    <canvas id="ptorque" class="plot"></canvas>
+  </section>
+  <section>
+    <h2 data-i18n="p_sweep">What-if: peak winding temperature</h2>
+    <select id="sweep" style="width:auto">
+      <option value="0" data-i18n="sw_cool">vs cooling factor (0.3–1.5)</option>
+      <option value="1" data-i18n="sw_ratio">vs gear ratio (0.4–2.5×)</option>
+    </select>
+    <canvas id="psweep" class="plot"></canvas>
+  </section>
+  <section>
+    <h2 data-i18n="env">Safe torque envelope (from cold)</h2>
+    <table><thead><tr><th data-i18n="ontime">on-time</th><th data-i18n="maxtq">max output torque</th><th data-i18n="maxcur">phase current</th></tr></thead><tbody id="envt"></tbody></table>
+    <p class="note" data-i18n="disclaimer">Educational estimates (lumped 2-node model, copper loss only). Validate on real hardware with the motor maker's data.</p>
+  </section>
+</div>
+</main>
+</body>
+</html>
