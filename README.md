@@ -29,7 +29,8 @@ Rust → WebAssembly로 만들었고 브라우저 안에서만 동작합니다 (
 - **동손만 고려**: 철손, 와전류, 인버터 손실, 마찰 발열은 모델링하지 않습니다. 주위 온도는 일정합니다.
 - **전류/저항 규약 (피크 진폭 Kt)**: 모터 토크 = 출력 토크 / (감속비·η), I_q = τ_motor / Kt
   (I_q는 상전류 진폭, dq 진폭 불변 변환). 동손 P = 1.5·I_q²·R_ph(T), R_ph = R_pp / 2,
-  R(T) = R25·(1 + α(T − 25 °C)). Kt가 RMS 상전류 기준이라면 P = 3·I_rms²·R_ph이 같은 값을 줍니다.
+  R(T) = R25·(1 + α(T − 25 °C)). 데이터시트 Kt가 RMS 상전류 기준이라면 먼저 Kt_peak = Kt_rms / √2로 변환해 입력하세요
+  (그대로 넣으면 손실을 2배 과소평가합니다).
   감속기 효율은 역구동 방향에도 같은 방식으로 적용합니다(보수적).
 - **적분**: 각 일정 토크 구간에서 손실은 권선 온도에 대해 아핀(P = p0 + b·Tw)이므로 2노드 시스템은
   선형입니다. 구간 경계까지 정확한 지수 해(2×2 행렬 지수)로 진행하므로 시간 간격과 무관하게 안정적입니다.
@@ -95,7 +96,8 @@ network requests).
 - **Current / resistance convention (peak-amplitude Kt)**: motor torque = output torque / (ratio·η),
   I_q = τ_motor / Kt where I_q is the phase-current amplitude (amplitude-invariant dq).
   Copper loss P = 1.5·I_q²·R_ph(T) with R_ph = R_pp / 2 and R(T) = R25·(1 + α(T − 25 °C)).
-  For an RMS-based Kt, P = 3·I_rms²·R_ph gives the same number. Gear efficiency is applied the same way
+  If a datasheet quotes Kt per RMS phase current, enter Kt_peak = Kt_rms / √2 (entering it as is
+  would understate the loss by 2×). Gear efficiency is applied the same way
   when back-driven (conservative).
 - **Integration**: within a constant-torque segment the loss is affine in winding temperature, so the
   network is linear; it is stepped with the exact 2×2 matrix-exponential solution up to each segment
