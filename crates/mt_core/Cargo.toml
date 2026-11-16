@@ -1,0 +1,8 @@
+[package]
+name = "mt_core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Lumped two-node thermal model of a robot joint motor (copper loss, R(T), RMS torque)."
+
+[dependencies]
